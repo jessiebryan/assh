@@ -48,7 +48,9 @@ func runPingCommand(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "failed to get host %q", target)
 	}
 
-	// Check for custom ProxyCommand (not supported)
+	if len(host.Gateways) > 0 {
+		return errors.New("assh \"ping\" is not working with gateways (yet)")
+	}
 	if host.ProxyCommand != "" {
 		return errors.New("assh \"ping\" is not working with custom ProxyCommand (yet)")
 	}
@@ -59,50 +61,14 @@ func runPingCommand(cmd *cobra.Command, args []string) error {
 		portName = "unknown"
 	}
 	proto := "tcp"
-	
-	// Determine the actual target based on gateways
-	var finalHost *config.Host
-	var gatewayChain []string
-	
-	if len(host.Gateways) > 0 {
-		// Try each gateway
-		logger().Debug("Trying gateways for ping", zap.String("gateways", strings.Join(host.Gateways, ", ")))
-		for _, gateway := range host.Gateways {
-			if gateway == "direct" {
-				// Direct connection - use original host
-				finalHost = host
-				break
-			} else {
-				// Use gateway
-				gatewayHost := conf.GetGatewaySafe(gateway)
-				gatewayChain = append(gatewayChain, gateway)
-				finalHost = gatewayHost
-				// For now, we only support first-level gateway for ping
-				break
-			}
-		}
-		if finalHost == nil {
-			return errors.New("no available gateway for ping")
-		}
-	} else {
-		finalHost = host
-	}
-
-	if len(gatewayChain) > 0 {
-		fmt.Printf("PING %s via gateway %s (%s) PORT %s (%s) PROTO %s\n", 
-			target, gatewayChain[0], finalHost.HostName, finalHost.Port, portName, proto)
-	} else {
-		fmt.Printf("PING %s (%s) PORT %s (%s) PROTO %s\n", target, finalHost.HostName, finalHost.Port, portName, proto)
-	}
-	
-	dest := formatHostPort(finalHost.HostName, finalHost.Port)
+	fmt.Printf("PING %s (%s) PORT %s (%s) PROTO %s\n", target, host.HostName, host.Port, portName, proto)
+	dest := formatHostPort(host.HostName, host.Port)
 	count := uint(viper.GetInt("count"))
 	transmittedPackets := 0
 	receivedPackets := 0
 	minRoundtrip := time.Duration(0)
 	maxRoundtrip := time.Duration(0)
 	totalRoundtrip := time.Duration(0)
-	
 	for seq := uint(0); count == 0 || seq < count; seq++ {
 		if seq > 0 {
 			time.Sleep(time.Duration(viper.GetFloat64("wait")) * time.Second)
@@ -127,7 +93,7 @@ func runPingCommand(cmd *cobra.Command, args []string) error {
 		}
 		if err == nil {
 			receivedPackets++
-			fmt.Printf("Connected to %s: seq=%d time=%v protocol=%s port=%s\n", finalHost.HostName, seq, duration, proto, finalHost.Port)
+			fmt.Printf("Connected to %s: seq=%d time=%v protocol=%s port=%s\n", host.HostName, seq, duration, proto, host.Port)
 			if viper.GetBool("o") {
 				goto stats
 			}
@@ -148,3 +114,11 @@ stats:
 	return nil
 }
 
+// formatHostPort formats a hostname and port for net.Dial, wrapping IPv6 addresses in brackets
+func formatHostPort(hostname, port string) string {
+	// Check if hostname contains colons (likely IPv6) and isn't already bracketed
+	if strings.Contains(hostname, ":") && !strings.HasPrefix(hostname, "[") {
+		return fmt.Sprintf("[%s]:%s", hostname, port)
+	}
+	return fmt.Sprintf("%s:%s", hostname, port)
+}
