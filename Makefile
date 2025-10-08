@@ -13,7 +13,12 @@ PRE_BUMPDEPS_STEPS += generate
 VERSION ?= `git describe --tags --always`
 VCS_REF ?= `git rev-parse --short HEAD`
 
-GO_INSTALL_OPTS = -ldflags="-X 'moul.io/assh/v2/pkg/version.Version=$(VERSION)' -X 'moul.io/assh/v2/pkg/version.VcsRef=$(VCS_REF)' "
+# Export CGO_ENABLED=0 for all Go builds (improves macOS compatibility and creates static binaries)
+export CGO_ENABLED=0
+
+# Add -trimpath for reproducible builds and macOS compatibility
+GO_BUILD_FLAGS = -trimpath
+GO_INSTALL_OPTS = $(GO_BUILD_FLAGS) -ldflags="-s -w -X 'moul.io/assh/v2/pkg/version.Version=$(VERSION)' -X 'moul.io/assh/v2/pkg/version.VcsRef=$(VCS_REF)'"
 
 include rules.mk
 
@@ -42,8 +47,7 @@ gen-release: generate
 	GOOS=openbsd GOARCH=386   go build $(GO_INSTALL_OPTS) -v -o .release/assh_openbsd_386   .
 	GOOS=openbsd GOARCH=arm   go build $(GO_INSTALL_OPTS) -v -o .release/assh_openbsd_arm   .
 	GOOS=darwin  GOARCH=amd64 go build $(GO_INSTALL_OPTS) -v -o .release/assh_darwin_amd64  .
-#	GOOS=darwin  GOARCH=386   go build $(GO_INSTALL_OPTS) -v -o .release/assh_darwin_386    .
-#	GOOS=darwin  GOARCH=arm   go build $(GO_INSTALL_OPTS) -v -o .release/assh_darwin_arm    .
+	GOOS=darwin  GOARCH=arm64 go build $(GO_INSTALL_OPTS) -v -o .release/assh_darwin_arm64  .
 	GOOS=netbsd  GOARCH=amd64 go build $(GO_INSTALL_OPTS) -v -o .release/assh_netbsd_amd64  .
 	GOOS=netbsd  GOARCH=386   go build $(GO_INSTALL_OPTS) -v -o .release/assh_netbsd_386    .
 	GOOS=netbsd  GOARCH=arm   go build $(GO_INSTALL_OPTS) -v -o .release/assh_netbsd_arm    .
@@ -52,4 +56,3 @@ gen-release: generate
 	GOOS=freebsd GOARCH=arm   go build $(GO_INSTALL_OPTS) -v -o .release/assh_freebsd_arm   .
 	GOOS=windows GOARCH=amd64 go build $(GO_INSTALL_OPTS) -v -o .release/assh_windows_amd64.exe .
 	GOOS=windows GOARCH=386   go build $(GO_INSTALL_OPTS) -v -o .release/assh_windows_386.exe   .
-#	GOOS=windows GOARCH=arm   go build $(GO_INSTALL_OPTS) -v -o .release/assh_windows_arm.exe   .
