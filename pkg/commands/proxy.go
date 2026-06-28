@@ -498,15 +498,8 @@ func proxyGo(host *config.Host, dryRun bool) error {
 	waitGroup := sync.WaitGroup{}
 	result := exportReadWrite{}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = context.WithValue(ctx, syncContextKey, &waitGroup)
-
-	waitGroup.Add(2)
-
-	var reader io.Reader
-	var writer io.Writer
-	reader = conn
-	writer = conn
+	var reader io.Reader = conn
+	var writer io.Writer = conn
 	if host.RateLimit != "" {
 		bytes, err := humanize.ParseBytes(host.RateLimit)
 		if err != nil {
@@ -518,11 +511,64 @@ func proxyGo(host *config.Host, dryRun bool) error {
 		writer = ratelimit.NewWriter(conn, limiter)
 	}
 
+	// Probe the connection by waiting for the remote SSH server's identification
+	// banner before piping any client (stdin) data. An SSH server sends its
+	// banner immediately on connect, so receiving bytes proves the path is
+	// actually alive: a successful TCP dial is not enough when a firewall
+	// accepts the SYN but then black-holes the connection.
+	//
+	// Crucially, we do NOT read from stdin during this probe. If it fails we
+	// return with stdin untouched, so the gateway-failover logic can retry the
+	// next gateway with the client's SSH handshake bytes still intact. (Reading
+	// stdin here would consume the client's KEXINIT and corrupt the next
+	// gateway's stream.)
+	//
+	// GatewayConnectTimeout therefore bounds connection establishment only; once
+	// the banner arrives the deadline is cleared so the live session is not
+	// torn down by the timeout.
+	if timeout > 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(time.Duration(timeout) * time.Second)); err != nil {
+			_ = conn.Close()
+			return errors.Wrap(err, "failed to set connect timeout")
+		}
+	}
+	banner := make([]byte, 1024)
+	n, err := reader.Read(banner)
+	if err != nil {
+		_ = conn.Close()
+		// OnConnectError hook
+		connectHookArgs.Error = err.Error()
+		logger().Debug("Calling OnConnectError hooks")
+		if drivers, herr := host.Hooks.OnConnectError.InvokeAll(connectHookArgs); herr != nil {
+			logger().Error("OnConnectError hook failed", zap.Error(herr))
+		} else {
+			defer drivers.Close()
+		}
+		return errors.Wrap(err, "failed to read banner from host")
+	}
+	// Liveness confirmed: clear the deadline so the established session is not
+	// bounded by the connect timeout.
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return errors.Wrap(err, "failed to clear connect timeout")
+	}
+	// Forward the banner bytes we already consumed, preserving stream order.
+	if _, err := os.Stdout.Write(banner[:n]); err != nil {
+		_ = conn.Close()
+		return errors.Wrap(err, "failed to forward banner to stdout")
+	}
+	stats.WrittenBytes += uint64(n)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, syncContextKey, &waitGroup)
+
+	waitGroup.Add(2)
+
 	c1 := readAndWrite(ctx, reader, os.Stdout)
 	c2 := readAndWrite(ctx, os.Stdin, writer)
 	select {
 	case result = <-c1:
-		stats.WrittenBytes = result.written
+		stats.WrittenBytes += result.written
 	case result = <-c2:
 	}
 	if result.err != nil && result.err == io.EOF {
@@ -536,7 +582,7 @@ func proxyGo(host *config.Host, dryRun bool) error {
 	waitGroup.Wait()
 	select {
 	case res := <-c1:
-		stats.WrittenBytes = res.written
+		stats.WrittenBytes += res.written
 	default:
 	}
 
