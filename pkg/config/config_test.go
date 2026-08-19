@@ -1292,6 +1292,39 @@ func TestConfig_String(t *testing.T) {
 	})
 }
 
+func TestConfig_SetEnv(t *testing.T) {
+	Convey("Testing Config.SetEnv", t, func() {
+		config := New()
+		err := config.LoadConfig(strings.NewReader(`
+defaults:
+  SetEnv:
+  - TERM=xterm-256color
+hosts:
+  example:
+    HostName: example.com
+  direct:
+    HostName: direct.example.com
+    SetEnv: LANG=C
+`))
+		So(err, ShouldBeNil)
+
+		host, err := config.GetHost("example")
+		So(err, ShouldBeNil)
+		So([]string(host.SetEnv), ShouldResemble, []string{"TERM=xterm-256color"})
+		So(strings.Contains(config.String(), `"SetEnv":["TERM=xterm-256color"]`), ShouldBeTrue)
+
+		directHost, err := config.GetHost("direct")
+		So(err, ShouldBeNil)
+		So([]string(directHost.SetEnv), ShouldResemble, []string{"LANG=C"})
+
+		var buffer bytes.Buffer
+		err = config.WriteSSHConfigTo(&buffer)
+		So(err, ShouldBeNil)
+		So(strings.Contains(buffer.String(), "Host *\n  SetEnv TERM=xterm-256color\n"), ShouldBeTrue)
+		So(strings.Contains(buffer.String(), "Host direct\n  SetEnv LANG=C\n"), ShouldBeTrue)
+	})
+}
+
 func TestConfig_WriteSSHConfig(t *testing.T) {
 	Convey("Testing Config.WriteSSHConfig", t, func() {
 		config := dummyConfig()

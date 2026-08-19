@@ -380,6 +380,8 @@ defaults:
   * a `defaults` section containing global flags
   * and an `includes` section containing path to other configuration files
 
+SSH options such as `SetEnv` can be placed under `defaults`; `assh config build` writes them into the generated `~/.ssh/config`.
+
 ```yaml
 hosts:
 
@@ -489,6 +491,8 @@ templates:
 
 defaults:
   # Defaults are applied to each hosts
+  SetEnv:
+  - TERM=xterm-256color
   ControlMaster: auto
   ControlPath: ~/tmp/.ssh/cm/%h-%p-%r.sock
   ControlPersist: yes
