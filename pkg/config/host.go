@@ -96,6 +96,7 @@ type Host struct {
 	RhostsRSAAuthentication          string                    `yaml:"rhostsrsaauthentication,omitempty,flow" json:"RhostsRSAAuthentication,omitempty"`
 	RSAAuthentication                string                    `yaml:"rsaauthentication,omitempty,flow" json:"RSAAuthentication,omitempty"`
 	SendEnv                          composeyaml.Stringorslice `yaml:"sendenv,omitempty,flow" json:"SendEnv,omitempty"`
+	SetEnv                           composeyaml.Stringorslice `yaml:"setenv,omitempty,flow" json:"SetEnv,omitempty"`
 	ServerAliveCountMax              int                       `yaml:"serveralivecountmax,omitempty,flow" json:"ServerAliveCountMax,omitempty"`
 	ServerAliveInterval              int                       `yaml:"serveraliveinterval,omitempty,flow" json:"ServerAliveInterval,omitempty"`
 	StreamLocalBindMask              string                    `yaml:"streamlocalbindmask,omitempty,flow" json:"StreamLocalBindMask,omitempty"`
@@ -485,6 +486,9 @@ func (h *Host) Options() OptionsList {
 	}
 	for _, entry := range h.SendEnv {
 		options = append(options, Option{Name: "SendEnv", Value: entry})
+	}
+	for _, entry := range h.SetEnv {
+		options = append(options, Option{Name: "SetEnv", Value: entry})
 	}
 	if h.ServerAliveCountMax != 0 {
 		options = append(options, Option{Name: "ServerAliveCountMax", Value: fmt.Sprintf("%d", h.ServerAliveCountMax)})
@@ -994,6 +998,11 @@ func (h *Host) ApplyDefaults(defaults *Host) {
 	}
 	h.SendEnv = utils.ExpandSliceField(h.SendEnv)
 
+	if len(h.SetEnv) == 0 {
+		h.SetEnv = defaults.SetEnv
+	}
+	h.SetEnv = utils.ExpandSliceField(h.SetEnv)
+
 	if h.ServerAliveCountMax == 0 {
 		h.ServerAliveCountMax = defaults.ServerAliveCountMax
 	}
@@ -1408,6 +1417,9 @@ func (h *Host) WriteSSHConfigTo(w io.Writer) error {
 		}
 		for _, entry := range h.SendEnv {
 			_, _ = fmt.Fprintf(w, "  SendEnv %s\n", entry)
+		}
+		for _, entry := range h.SetEnv {
+			_, _ = fmt.Fprintf(w, "  SetEnv %s\n", entry)
 		}
 		if h.ServerAliveCountMax != 0 {
 			_, _ = fmt.Fprintf(w, "  ServerAliveCountMax %d\n", h.ServerAliveCountMax)
